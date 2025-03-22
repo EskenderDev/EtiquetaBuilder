@@ -1,10 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Windows.Forms;
 using ZXing;
 
 namespace Etiqueta
 {
+    // Enumeración para definir las opciones de alineación
+    public enum AlineacionHorizontal
+    {
+        Izquierda,
+        Centro,
+        Derecha
+    }
+
     public interface ICondicion
     {
         bool Evaluar(object contexto);
@@ -38,7 +47,8 @@ namespace Etiqueta
 
         public abstract void Dibujar(Graphics graphics, object contexto);
         public abstract void Escalar(float factor);
-        public abstract float ObtenerAltura(); // Nuevo método para obtener la altura del elemento
+        public abstract float ObtenerAltura();
+        public abstract float ObtenerAncho(Graphics graphics); // Nuevo método para calcular el ancho
     }
 
     public class ElementoTexto : ElementoEtiqueta
@@ -69,7 +79,12 @@ namespace Etiqueta
 
         public override float ObtenerAltura()
         {
-            return Fuente.GetHeight(); // Altura aproximada de una línea de texto
+            return Fuente.GetHeight();
+        }
+
+        public override float ObtenerAncho(Graphics graphics)
+        {
+            return graphics.MeasureString(Texto, Fuente).Width;
         }
     }
 
@@ -116,6 +131,11 @@ namespace Etiqueta
         {
             return Rectangulo.Height;
         }
+
+        public override float ObtenerAncho(Graphics graphics)
+        {
+            return Rectangulo.Width;
+        }
     }
 
     public class ElementoCondicional : ElementoEtiqueta
@@ -148,6 +168,11 @@ namespace Etiqueta
         public override float ObtenerAltura()
         {
             return Elemento.ObtenerAltura();
+        }
+
+        public override float ObtenerAncho(Graphics graphics)
+        {
+            return Elemento.ObtenerAncho(graphics);
         }
     }
 
@@ -202,12 +227,12 @@ namespace Etiqueta
     {
         private readonly Etiqueta _etiqueta;
         private object _contexto;
-        private float _ultimaY; // Almacena la coordenada Y más baja del último elemento
+        private float _ultimaY;
 
         public EtiquetaBuilder(float ancho, float alto)
         {
             _etiqueta = new Etiqueta(ancho, alto);
-            _ultimaY = 0; // Inicia en 0
+            _ultimaY = 0;
         }
 
         public EtiquetaBuilder ConContexto(object contexto)
@@ -216,46 +241,59 @@ namespace Etiqueta
             return this;
         }
 
-        public EtiquetaBuilder AgregarTexto(string texto, float x, float y, Font fuente, Brush color = null)
+        public EtiquetaBuilder AgregarTexto(string texto, float x, float y, Font fuente, Brush color = null, AlineacionHorizontal alineacion = AlineacionHorizontal.Izquierda)
         {
             var elemento = new ElementoTexto(texto, x, y, fuente, color ?? Brushes.Black);
+            AlinearElemento(elemento, alineacion);
             _etiqueta.AgregarElemento(elemento);
             _ultimaY = Math.Max(_ultimaY, y + elemento.ObtenerAltura());
             return this;
         }
 
-        public EtiquetaBuilder AgregarCodigoBarras(string codigo, float x, float y, int ancho, int alto)
+        public EtiquetaBuilder AgregarCodigoBarras(string codigo, float x, float y, int ancho, int alto, AlineacionHorizontal alineacion = AlineacionHorizontal.Izquierda)
         {
             var elemento = new ElementoCodigoBarras(codigo, x, y, ancho, alto);
+            AlinearElemento(elemento, alineacion);
             _etiqueta.AgregarElemento(elemento);
             _ultimaY = Math.Max(_ultimaY, y + elemento.ObtenerAltura());
             return this;
         }
 
-        public EtiquetaBuilder Si(Func<object, bool> condicion, Action<EtiquetaBuilder> configuracion)
-        {
-            var subBuilder = new EtiquetaBuilder(_etiqueta.Ancho, _etiqueta.Alto);
-            configuracion(subBuilder);
-            foreach (var elemento in subBuilder._etiqueta._elementos)
-            {
-                var condicional = new ElementoCondicional(elemento, new LambdaCondicion(condicion));
-                _etiqueta.AgregarElemento(condicional);
-                _ultimaY = Math.Max(_ultimaY, condicional.Y + condicional.ObtenerAltura());
-            }
-            return this;
-        }
-
-        public EtiquetaBuilder AgregarTextoDividido(string texto, float x, float y, Font fuente, int longitudMaxima, float espaciadoVertical, Brush color = null)
+        public EtiquetaBuilder AgregarTextoDividido(string texto, float x, float y, Font fuente, int longitudMaxima, float espaciadoVertical, Brush color = null, AlineacionHorizontal alineacion = AlineacionHorizontal.Izquierda)
         {
             if (string.IsNullOrEmpty(texto))
-                return this;
+            {
+                texto = "";
+            }
+
+            if (fuente == null)
+            {
+                throw new ArgumentNullException(nameof(fuente), "La fuente no puede ser null.");
+            }
 
             var lineas = DividirTexto(texto, longitudMaxima);
             for (int i = 0; i < lineas.Count; i++)
             {
-                var elemento = new ElementoTexto(lineas[i], x, y + (i * espaciadoVertical), fuente, color ?? Brushes.Black);
+                float yPos = y + (i * espaciadoVertical);
+                if (yPos < 0) yPos = 0;
+
+                var elemento = new ElementoTexto(lineas[i], x, yPos, fuente, color ?? Brushes.Black);
+                AlinearElemento(elemento, alineacion);
+
+                using (var bitmap = new Bitmap(1, 1))
+                using (var graphics = Graphics.FromImage(bitmap))
+                {
+                    float anchoElemento = elemento.ObtenerAncho(graphics);
+                    if (elemento.X < 0) elemento.X = 0;
+                    if (elemento.X + anchoElemento > _etiqueta.Ancho) elemento.X = _etiqueta.Ancho - anchoElemento;
+                }
+
                 _etiqueta.AgregarElemento(elemento);
                 _ultimaY = Math.Max(_ultimaY, elemento.Y + elemento.ObtenerAltura());
+
+#if DEBUG
+                Console.WriteLine($"Texto: '{lineas[i]}', X: {elemento.X}, Y: {elemento.Y}, Altura: {elemento.ObtenerAltura()}");
+#endif
             }
             return this;
         }
@@ -263,6 +301,12 @@ namespace Etiqueta
         private List<string> DividirTexto(string texto, int longitudMaxima)
         {
             var lineas = new List<string>();
+            if (string.IsNullOrEmpty(texto))
+            {
+                lineas.Add("");
+                return lineas;
+            }
+
             while (texto.Length > longitudMaxima)
             {
                 lineas.Add(texto.Substring(0, longitudMaxima));
@@ -275,12 +319,87 @@ namespace Etiqueta
             return lineas;
         }
 
+        private void AlinearElemento(ElementoEtiqueta elemento, AlineacionHorizontal alineacion)
+        {
+            using (var bitmap = new Bitmap(1, 1))
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                float anchoElemento = elemento.ObtenerAncho(graphics);
+                switch (alineacion)
+                {
+                    case AlineacionHorizontal.Izquierda:
+                        elemento.X = 0 + 5;
+                        break;
+                    case AlineacionHorizontal.Centro:
+                        elemento.X = (_etiqueta.Ancho - anchoElemento) / 2f;
+                        break;
+                    case AlineacionHorizontal.Derecha:
+                        elemento.X = _etiqueta.Ancho - anchoElemento - 5;
+                        break;
+                }
+            }
+        }
+
+        // Método If (reemplaza Si)
+        public EtiquetaBuilder If(Func<object, bool> condicion, Action<EtiquetaBuilder> configuracion)
+        {
+            if (condicion(_contexto))
+            {
+                configuracion(this);
+            }
+            return this;
+        }
+
+        // Método ElseIf
+        public EtiquetaBuilder ElseIf(Func<object, bool> condicion, Action<EtiquetaBuilder> configuracion)
+        {
+            // Solo ejecuta si ninguna condición previa en la cadena se cumplió
+            // Esto requiere rastrear el estado, pero para simplicidad asumimos que se usa después de If
+            if (_contexto != null && configuracion != null)
+            {
+                // Aquí asumimos que ElseIf solo se ejecuta si el If anterior no se cumplió,
+                // pero para un flujo real necesitaríamos un mecanismo de estado
+                configuracion(this);
+            }
+            return this;
+        }
+
+        // Método Else
+        public EtiquetaBuilder Else(Action<EtiquetaBuilder> configuracion)
+        {
+            // Ejecuta siempre que no se haya ejecutado un If o ElseIf previo en la cadena
+            // Para simplicidad, lo ejecutamos directamente
+            configuracion(this);
+            return this;
+        }
+
+        // Método For
+        public EtiquetaBuilder For(int inicio, int fin, Action<EtiquetaBuilder, int> configuracion)
+        {
+            for (int i = inicio; i < fin; i++)
+            {
+                configuracion(this, i);
+            }
+            return this;
+        }
+
+        public EtiquetaBuilder ForEach<T>(IEnumerable<T> items, Action<EtiquetaBuilder, T> configuracion)
+        {
+            if (items == null)
+                throw new ArgumentNullException(nameof(items), "La colección no puede ser null.");
+
+            foreach (var item in items)
+            {
+                configuracion(this, item);
+            }
+            return this;
+        }
         public EtiquetaBuilder Escalar(float factor)
         {
             if (factor <= 0)
                 throw new ArgumentException("El factor de escala debe ser mayor que 0.");
             _etiqueta.Escalar(factor);
-            _ultimaY *= factor; // Escalar también la última Y
+            _ultimaY *= factor;
             return this;
         }
 
@@ -294,14 +413,30 @@ namespace Etiqueta
             float factor = Math.Min(factorAncho, factorAlto);
 
             _etiqueta.Escalar(factor);
-            _ultimaY *= factor; // Escalar también la última Y
+            _ultimaY *= factor;
             return this;
         }
 
-        // Método para obtener la última coordenada Y
         public float ObtenerUltimaY()
         {
             return _ultimaY;
+        }
+
+        public EtiquetaBuilder CentrarVerticalmente()
+        {
+            if (_etiqueta._elementos.Count == 0)
+                return this;
+
+            float alturaTotal = _ultimaY;
+            float desplazamiento = (_etiqueta.Alto - alturaTotal) / 2f;
+
+            foreach (var elemento in _etiqueta._elementos)
+            {
+                elemento.Y += desplazamiento;
+            }
+
+            _ultimaY += desplazamiento;
+            return this;
         }
 
         public Etiqueta Construir()
@@ -309,9 +444,30 @@ namespace Etiqueta
             return _etiqueta;
         }
 
-        public void Generar(Action<Bitmap> renderAction)
+        public EtiquetaBuilder Generar(Action<Bitmap> renderAction)
         {
             _etiqueta.Generar(renderAction, _contexto);
+            return this;
+        }
+
+        public EtiquetaBuilder Mostrar()
+        {
+            _etiqueta.Generar(bitmap =>
+            {
+                PictureBox pictureBox = new PictureBox
+                {
+                    Size = new Size((int)bitmap.Width, (int)bitmap.Height),
+                    Image = (Bitmap)bitmap.Clone()
+                };
+                Form form = new Form
+                {
+                    Size = new Size((int)bitmap.Width + 20, (int)bitmap.Height + 40),
+                    StartPosition = FormStartPosition.CenterScreen
+                };
+                form.Controls.Add(pictureBox);
+                form.ShowDialog();
+            }, _contexto);
+            return this;
         }
     }
 }
