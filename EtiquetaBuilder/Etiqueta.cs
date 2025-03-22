@@ -38,6 +38,7 @@ namespace Etiqueta
 
         public abstract void Dibujar(Graphics graphics, object contexto);
         public abstract void Escalar(float factor);
+        public abstract float ObtenerAltura(); // Nuevo método para obtener la altura del elemento
     }
 
     public class ElementoTexto : ElementoEtiqueta
@@ -64,6 +65,11 @@ namespace Etiqueta
             X *= factor;
             Y *= factor;
             Fuente = new Font(Fuente.FontFamily, Fuente.Size * factor, Fuente.Style);
+        }
+
+        public override float ObtenerAltura()
+        {
+            return Fuente.GetHeight(); // Altura aproximada de una línea de texto
         }
     }
 
@@ -105,6 +111,11 @@ namespace Etiqueta
                 (int)(Rectangulo.Width * factor),
                 (int)(Rectangulo.Height * factor));
         }
+
+        public override float ObtenerAltura()
+        {
+            return Rectangulo.Height;
+        }
     }
 
     public class ElementoCondicional : ElementoEtiqueta
@@ -132,6 +143,11 @@ namespace Etiqueta
             X *= factor;
             Y *= factor;
             Elemento.Escalar(factor);
+        }
+
+        public override float ObtenerAltura()
+        {
+            return Elemento.ObtenerAltura();
         }
     }
 
@@ -186,10 +202,12 @@ namespace Etiqueta
     {
         private readonly Etiqueta _etiqueta;
         private object _contexto;
+        private float _ultimaY; // Almacena la coordenada Y más baja del último elemento
 
         public EtiquetaBuilder(float ancho, float alto)
         {
             _etiqueta = new Etiqueta(ancho, alto);
+            _ultimaY = 0; // Inicia en 0
         }
 
         public EtiquetaBuilder ConContexto(object contexto)
@@ -200,13 +218,17 @@ namespace Etiqueta
 
         public EtiquetaBuilder AgregarTexto(string texto, float x, float y, Font fuente, Brush color = null)
         {
-            _etiqueta.AgregarElemento(new ElementoTexto(texto, x, y, fuente, color ?? Brushes.Black));
+            var elemento = new ElementoTexto(texto, x, y, fuente, color ?? Brushes.Black);
+            _etiqueta.AgregarElemento(elemento);
+            _ultimaY = Math.Max(_ultimaY, y + elemento.ObtenerAltura());
             return this;
         }
 
         public EtiquetaBuilder AgregarCodigoBarras(string codigo, float x, float y, int ancho, int alto)
         {
-            _etiqueta.AgregarElemento(new ElementoCodigoBarras(codigo, x, y, ancho, alto));
+            var elemento = new ElementoCodigoBarras(codigo, x, y, ancho, alto);
+            _etiqueta.AgregarElemento(elemento);
+            _ultimaY = Math.Max(_ultimaY, y + elemento.ObtenerAltura());
             return this;
         }
 
@@ -216,7 +238,9 @@ namespace Etiqueta
             configuracion(subBuilder);
             foreach (var elemento in subBuilder._etiqueta._elementos)
             {
-                _etiqueta.AgregarElemento(new ElementoCondicional(elemento, new LambdaCondicion(condicion)));
+                var condicional = new ElementoCondicional(elemento, new LambdaCondicion(condicion));
+                _etiqueta.AgregarElemento(condicional);
+                _ultimaY = Math.Max(_ultimaY, condicional.Y + condicional.ObtenerAltura());
             }
             return this;
         }
@@ -229,7 +253,9 @@ namespace Etiqueta
             var lineas = DividirTexto(texto, longitudMaxima);
             for (int i = 0; i < lineas.Count; i++)
             {
-                _etiqueta.AgregarElemento(new ElementoTexto(lineas[i], x, y + (i * espaciadoVertical), fuente, color ?? Brushes.Black));
+                var elemento = new ElementoTexto(lineas[i], x, y + (i * espaciadoVertical), fuente, color ?? Brushes.Black);
+                _etiqueta.AgregarElemento(elemento);
+                _ultimaY = Math.Max(_ultimaY, elemento.Y + elemento.ObtenerAltura());
             }
             return this;
         }
@@ -254,8 +280,10 @@ namespace Etiqueta
             if (factor <= 0)
                 throw new ArgumentException("El factor de escala debe ser mayor que 0.");
             _etiqueta.Escalar(factor);
+            _ultimaY *= factor; // Escalar también la última Y
             return this;
         }
+
         public EtiquetaBuilder EscalarDinamicamente(float anchoObjetivo, float altoObjetivo)
         {
             if (anchoObjetivo <= 0 || altoObjetivo <= 0)
@@ -266,8 +294,16 @@ namespace Etiqueta
             float factor = Math.Min(factorAncho, factorAlto);
 
             _etiqueta.Escalar(factor);
+            _ultimaY *= factor; // Escalar también la última Y
             return this;
         }
+
+        // Método para obtener la última coordenada Y
+        public float ObtenerUltimaY()
+        {
+            return _ultimaY;
+        }
+
         public Etiqueta Construir()
         {
             return _etiqueta;
