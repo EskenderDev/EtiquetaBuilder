@@ -228,7 +228,7 @@ namespace Etiqueta
         private readonly Etiqueta _etiqueta;
         private object _contexto;
         private float _ultimaY;
-
+        private bool _condicionEjecutada
         public EtiquetaBuilder(float ancho, float alto)
         {
             _etiqueta = new Etiqueta(ancho, alto);
@@ -339,37 +339,34 @@ namespace Etiqueta
                 }
             }
         }
-
-        // Método If (reemplaza Si)
         public EtiquetaBuilder If(Func<object, bool> condicion, Action<EtiquetaBuilder> configuracion)
         {
-            if (condicion(_contexto))
+            _condicionEjecutada = false;
+            if (!_condicionEjecutada && condicion(_contexto))
             {
                 configuracion(this);
+                _condicionEjecutada = true;
             }
             return this;
         }
 
-        // Método ElseIf
         public EtiquetaBuilder ElseIf(Func<object, bool> condicion, Action<EtiquetaBuilder> configuracion)
         {
-            // Solo ejecuta si ninguna condición previa en la cadena se cumplió
-            // Esto requiere rastrear el estado, pero para simplicidad asumimos que se usa después de If
-            if (_contexto != null && configuracion != null)
+            if (!_condicionEjecutada && condicion(_contexto))
             {
-                // Aquí asumimos que ElseIf solo se ejecuta si el If anterior no se cumplió,
-                // pero para un flujo real necesitaríamos un mecanismo de estado
                 configuracion(this);
+                _condicionEjecutada = true;
             }
             return this;
         }
 
-        // Método Else
         public EtiquetaBuilder Else(Action<EtiquetaBuilder> configuracion)
         {
-            // Ejecuta siempre que no se haya ejecutado un If o ElseIf previo en la cadena
-            // Para simplicidad, lo ejecutamos directamente
-            configuracion(this);
+            if (!_condicionEjecutada)
+            {
+                configuracion(this);
+                _condicionEjecutada = true;
+            }
             return this;
         }
 
@@ -447,6 +444,7 @@ namespace Etiqueta
         public EtiquetaBuilder Generar(Action<Bitmap> renderAction)
         {
             _etiqueta.Generar(renderAction, _contexto);
+            _condicionEjecutada = false;
             return this;
         }
 
