@@ -228,7 +228,7 @@ namespace Etiqueta
         private readonly Etiqueta _etiqueta;
         private object _contexto;
         private float _ultimaY;
-        private bool _condicionEjecutada
+        private bool _condicionEjecutada;
         public EtiquetaBuilder(float ancho, float alto)
         {
             _etiqueta = new Etiqueta(ancho, alto);
