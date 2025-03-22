@@ -45,12 +45,28 @@ class Program
 ### Construcción condicional de etiquetas
 
 ```csharp
-var etiqueta = new EtiquetaBuilder(300, 150)
-    .If(ctx => (bool)ctx, builder =>
+var builder = new EtiquetaBuilder(200, 100)
+    .ConContexto(new { Cantidad = 3 });
+
+Font font = new Font("Verdana", 8);
+var items = new List<string> { "Item 1", "Item 2", "Item 3" };
+
+builder
+    .If(ctx => ((dynamic)ctx).Cantidad > 2, b =>
     {
-        builder.AgregarTexto("Descuento aplicado", 10, 10, new Font("Arial", 12), Brushes.Red);
+        b.AgregarTexto("Muchos ítems", 0, 0, font, Brushes.Black, AlineacionHorizontal.Centro);
     })
-    .Construir();
+    .Else(b =>
+    {
+        b.AgregarTexto("Pocos ítems", 0, 0, font, Brushes.Black, AlineacionHorizontal.Centro);
+    })
+    .ForEach(items, (b, item) =>
+    {
+        b.AgregarTexto(item, 0, b.ObtenerUltimaY() + 5, font, Brushes.Blue, AlineacionHorizontal.Izquierda);
+    })
+    .CentrarVerticalmente()
+    .Generar(bitmap => bitmap.Save("etiqueta_control.png", System.Drawing.Imaging.ImageFormat.Png))
+    .Mostrar();
 ```
 
 ### Escalar dinámicamente
